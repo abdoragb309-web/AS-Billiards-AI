@@ -1,4 +1,8 @@
-<?xml version="1.0" encoding="utf-8"?><manifest xmlns:android="http://schemas.android.com/apk/res/android"><uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<?xml version="1.0" encoding="utf-8"?><manifest xmlns:android="http://schemas.android.com/apk/res/android"><uses-permission
+    android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+<uses-permission
+    android:name="android.permission.FOREGROUND_SERVICE" />
 
 <uses-permission
     android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
@@ -23,6 +27,10 @@
         android:name=".ScreenCaptureService"
         android:exported="false"
         android:foregroundServiceType="mediaProjection" />
+
+    <service
+        android:name=".TrajectoryOverlayService"
+        android:exported="false" />
 
 </application>
 
