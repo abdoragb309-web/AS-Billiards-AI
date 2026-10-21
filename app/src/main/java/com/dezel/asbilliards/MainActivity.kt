@@ -10,8 +10,10 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 
 class MainActivity : Activity() {
@@ -20,20 +22,20 @@ private lateinit var statusText: TextView
 
 private val captureRequestCode = 2001
 
-private val green = Color.rgb(0, 220, 130)
-private val background = Color.rgb(10, 35, 30)
+private val backgroundColor = Color.rgb(10, 35, 30)
+private val neonGreenColor = Color.rgb(0, 180, 100)
 
 override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
-    window.statusBarColor = background
+    window.statusBarColor = backgroundColor
     window.navigationBarColor = Color.BLACK
 
     val root = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER
-        setPadding(28, 24, 28, 24)
-        setBackgroundColor(background)
+        setPadding(24, 24, 24, 24)
+        setBackgroundColor(backgroundColor)
     }
 
     val title = TextView(this).apply {
@@ -45,7 +47,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
     }
 
     val subtitle = TextView(this).apply {
-        text = "مساعد مسارات البلياردو 🎱"
+        text = "مساعد تحليل مسارات البلياردو 🎱"
         textSize = 18f
         gravity = Gravity.CENTER
         setTextColor(Color.LTGRAY)
@@ -55,48 +57,48 @@ override fun onCreate(savedInstanceState: Bundle?) {
         text = "حالة النظام: جاهز"
         textSize = 16f
         gravity = Gravity.CENTER
-        setTextColor(green)
-        setPadding(8, 20, 8, 20)
+        setTextColor(Color.rgb(100, 255, 160))
+        setPadding(8, 16, 8, 16)
     }
 
     val showButton = makeButton(
-        "🟢 إظهار مسارات الكرات",
-        green
+        "إظهار مسارات الكرات",
+        neonGreenColor
     ) {
         openTrajectoryOverlay()
     }
 
     val hideButton = makeButton(
-        "🔴 إخفاء مسارات الكرات",
-        Color.rgb(255, 90, 90)
+        "إخفاء مسارات الكرات",
+        Color.rgb(190, 45, 45)
     ) {
         sendOverlayAction(
             TrajectoryOverlayService.ACTION_HIDE,
-            "تم إخفاء المسارات"
+            "تم طلب إخفاء المسارات"
         )
     }
 
     val screenButton = makeButton(
-        "📱 بدء التقاط الشاشة",
-        Color.rgb(60, 150, 255)
+        "بدء التقاط الشاشة",
+        Color.rgb(40, 100, 190)
     ) {
         requestScreenCapture()
     }
 
     val analyzeButton = makeButton(
-        "🎱 تحليل الطاولة",
-        Color.rgb(255, 190, 40)
+        "تحليل الطاولة",
+        Color.rgb(170, 120, 20)
     ) {
         statusText.text =
-            "تحليل مواقع الكرات لم يُفعّل بعد"
+            "تحليل مواقع الكرات الحقيقي لم يُفعّل بعد"
     }
 
     val note = TextView(this).apply {
-        text = "الإصدار التجريبي\nالمسارات الحالية تجريبية وليست محسوبة من الكرات الحقيقية."
+        text = "الإصدار التجريبي\nالمسارات الحالية تجريبية، ولا تتبع مواقع الكرات الحقيقية بعد."
         textSize = 13f
         gravity = Gravity.CENTER
         setTextColor(Color.LTGRAY)
-        setPadding(8, 20, 8, 8)
+        setPadding(8, 16, 8, 8)
     }
 
     root.addView(title, spacedParams())
@@ -108,21 +110,36 @@ override fun onCreate(savedInstanceState: Bundle?) {
     root.addView(analyzeButton, spacedParams())
     root.addView(note, spacedParams())
 
-    setContentView(root)
+    val scrollView = ScrollView(this).apply {
+        fillViewport = true
+        setBackgroundColor(backgroundColor)
+        addView(
+            root,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+    }
+
+    setContentView(scrollView)
 }
 
 private fun makeButton(
     label: String,
-    color: Int,
+    buttonColor: Int,
     action: () -> Unit
 ): Button {
     return Button(this).apply {
         text = label
         textSize = 16f
         setTextColor(Color.WHITE)
-        setBackgroundColor(color)
+        setBackgroundColor(buttonColor)
         isAllCaps = false
-        setOnClickListener { action() }
+
+        setOnClickListener {
+            action()
+        }
     }
 }
 
@@ -131,18 +148,18 @@ private fun openTrajectoryOverlay() {
         statusText.text =
             "اسمح للتطبيق بالظهور فوق التطبيقات الأخرى"
 
-        val intent = Intent(
+        val settingsIntent = Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
             Uri.parse("package:$packageName")
         )
 
-        startActivity(intent)
+        startActivity(settingsIntent)
         return
     }
 
     sendOverlayAction(
         TrajectoryOverlayService.ACTION_SHOW,
-        "تم طلب إظهار المسارات التجريبية"
+        "تم إرسال طلب إظهار المسارات"
     )
 }
 
@@ -151,19 +168,19 @@ private fun sendOverlayAction(
     message: String
 ) {
     try {
-        val intent = Intent(
+        val serviceIntent = Intent(
             this,
             TrajectoryOverlayService::class.java
         ).apply {
             this.action = action
         }
 
-        startService(intent)
+        startService(serviceIntent)
         statusText.text = message
 
     } catch (e: Exception) {
         statusText.text =
-            "تعذر تنفيذ الأمر: ${e.message}"
+            "تعذر تنفيذ الأمر: ${e.message ?: "خطأ غير معروف"}"
     }
 }
 
@@ -189,9 +206,12 @@ override fun onActivityResult(
 ) {
     super.onActivityResult(requestCode, resultCode, data)
 
-    if (requestCode != captureRequestCode) return
+    if (requestCode != captureRequestCode) {
+        return
+    }
 
     if (resultCode == RESULT_OK && data != null) {
+
         val serviceIntent = Intent(
             this,
             ScreenCaptureService::class.java
@@ -211,11 +231,11 @@ override fun onActivityResult(
             startForegroundService(serviceIntent)
 
             statusText.text =
-                "تم إرسال إذن التقاط الشاشة إلى الخدمة"
+                "تم إرسال إذن الشاشة إلى خدمة الالتقاط"
 
         } catch (e: Exception) {
             statusText.text =
-                "تعذر تشغيل خدمة الالتقاط: ${e.message}"
+                "تعذر تشغيل خدمة الالتقاط: ${e.message ?: "خطأ غير معروف"}"
         }
 
     } else {
