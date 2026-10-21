@@ -8,62 +8,89 @@ import android.view.View
 
 class TrajectoryOverlay(context: Context) : View(context) {
 
-private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    style = Paint.Style.STROKE
-    strokeWidth = 5f
-    strokeCap = Paint.Cap.ROUND
-}
+    // توهج خلفي للخطوط
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 15f
+        strokeCap = Paint.Cap.ROUND
+        alpha = 100
+    }
 
-private val ballPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    style = Paint.Style.FILL
-}
+    // الخط الأساسي
+    private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 8f
+        strokeCap = Paint.Cap.ROUND
+    }
 
-override fun onDraw(canvas: Canvas) {
-    super.onDraw(canvas)
+    // دوائر بداية المسارات
+    private val ballPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+    }
 
-    // مسارات تجريبية للتأكد من الرسم فقط.
-    // لاحقًا سنستبدلها بمسارات محسوبة من مواقع الكرات الفعلية.
+    // حدود الدوائر
+    private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        color = Color.WHITE
+    }
 
-    drawTrajectory(
-        canvas,
-        0.15f, 0.70f,
-        0.75f, 0.30f,
-        Color.CYAN
-    )
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
 
-    drawTrajectory(
-        canvas,
-        0.35f, 0.55f,
-        0.85f, 0.55f,
-        Color.YELLOW
-    )
+        // مسارات تجريبية فقط، وليست محسوبة من مواقع الكرات الحقيقية.
 
-    drawTrajectory(
-        canvas,
-        0.60f, 0.75f,
-        0.25f, 0.25f,
-        Color.GREEN
-    )
-}
+        drawTrajectory(
+            canvas,
+            0.15f, 0.70f,
+            0.75f, 0.30f,
+            Color.rgb(0, 230, 255)
+        )
 
-private fun drawTrajectory(
-    canvas: Canvas,
-    startX: Float,
-    startY: Float,
-    endX: Float,
-    endY: Float,
-    color: Int
-) {
-    val x1 = width * startX
-    val y1 = height * startY
-    val x2 = width * endX
-    val y2 = height * endY
+        drawTrajectory(
+            canvas,
+            0.35f, 0.55f,
+            0.85f, 0.55f,
+            Color.rgb(255, 235, 0)
+        )
 
-    linePaint.color = color
-    canvas.drawLine(x1, y1, x2, y2, linePaint)
+        drawTrajectory(
+            canvas,
+            0.60f, 0.75f,
+            0.25f, 0.25f,
+            Color.rgb(0, 255, 100)
+        )
+    }
 
-    ballPaint.color = Color.WHITE
-    canvas.drawCircle(x1, y1, 8f, ballPaint)
-}
+    private fun drawTrajectory(
+        canvas: Canvas,
+        startX: Float,
+        startY: Float,
+        endX: Float,
+        endY: Float,
+        color: Int
+    ) {
+        val x1 = width * startX
+        val y1 = height * startY
+        val x2 = width * endX
+        val y2 = height * endY
 
+        // توهج ملون خلف الخط
+        glowPaint.color = color
+        glowPaint.alpha = 90
+        canvas.drawLine(x1, y1, x2, y2, glowPaint)
+
+        // الخط الملون الواضح
+        linePaint.color = color
+        canvas.drawLine(x1, y1, x2, y2, linePaint)
+
+        // دائرة بداية المسار
+        ballPaint.color = Color.WHITE
+        canvas.drawCircle(x1, y1, 12f, ballPaint)
+
+        // إطار الدائرة
+        borderPaint.color = color
+        canvas.drawCircle(x1, y1, 12f, borderPaint)
+    }
 }
