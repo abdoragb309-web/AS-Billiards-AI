@@ -15,182 +15,226 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
-import android.os.Looper
 import android.os.IBinder
+import android.os.Looper
 
 class ScreenCaptureService : Service() {
 
-companion object {
-    const val EXTRA_RESULT_CODE = "result_code"
-    const val EXTRA_RESULT_DATA = "result_data"
+    companion object {
+        const val EXTRA_RESULT_CODE = "result_code"
+        const val EXTRA_RESULT_DATA = "result_data"
 
-    private const val CHANNEL_ID = "as_billiards_capture"
-    private const val NOTIFICATION_ID = 1001
-}
-
-private var projection: MediaProjection? = null
-private var virtualDisplay: VirtualDisplay? = null
-private var imageReader: ImageReader? = null
-
-private val handler = Handler(Looper.getMainLooper())
-
-override fun onCreate() {
-    super.onCreate()
-    createNotificationChannel()
-}
-
-override fun onStartCommand(
-    intent: Intent?,
-    flags: Int,
-    startId: Int
-): Int {
-
-    if (Build.VERSION.SDK_INT >= 29) {
-        startForeground(
-            NOTIFICATION_ID,
-            createNotification(),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-        )
-    } else {
-        startForeground(
-            NOTIFICATION_ID,
-            createNotification()
-        )
+        private const val CHANNEL_ID = "as_billiards_capture"
+        private const val NOTIFICATION_ID = 1001
     }
 
-    val resultCode = intent?.getIntExtra(
-        EXTRA_RESULT_CODE,
-        0
-    ) ?: 0
+    private var projection: MediaProjection? = null
+    private var virtualDisplay: VirtualDisplay? = null
+    private var imageReader: ImageReader? = null
 
-    val resultData: Intent? = if (Build.VERSION.SDK_INT >= 33) {
-        intent?.getParcelableExtra(
-            EXTRA_RESULT_DATA,
-            Intent::class.java
-        )
-    } else {
-        @Suppress("DEPRECATION")
-        intent?.getParcelableExtra(EXTRA_RESULT_DATA)
+    private val handler = Handler(Looper.getMainLooper())
+
+    private var frameCount = 0
+    private var lastNotificationUpdate = 0L
+
+    private val projectionCallback =
+        object : MediaProjection.Callback() {
+            override fun onStop() {
+                stopSelf()
+            }
+        }
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
     }
 
-    if (resultData == null) {
-        stopSelf()
-        return START_NOT_STICKY
-    }
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int
+    ): Int {
 
-    try {
-        val manager = getSystemService(
-            Context.MEDIA_PROJECTION_SERVICE
-        ) as MediaProjectionManager
+        val resultCode = intent?.getIntExtra(
+            EXTRA_RESULT_CODE, 0
+        ) ?: 0
 
-        projection = manager.getMediaProjection(
-            resultCode,
-            resultData
-        )
+        val resultData: Intent? =
+            if (Build.VERSION.SDK_INT >= 33) {
+                intent?.getParcelableExtra(
+                    EXTRA_RESULT_DATA,
+                    Intent::class.java
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                intent?.getParcelableExtra(EXTRA_RESULT_DATA)
+            }
 
-        if (projection == null) {
+        if (resultData == null) {
             stopSelf()
             return START_NOT_STICKY
         }
 
-        startCapture()
-    } catch (e: Exception) {
-        stopSelf()
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    createNotification("جاري تجهيز الالتقاط"),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+            } else {
+                startForeground(
+                    NOTIFICATION_ID,
+                    createNotification("جاري تجهيز الالتقاط")
+                )
+            }
+
+            val manager = getSystemService(
+                Context.MEDIA_PROJECTION_SERVICE
+            ) as MediaProjectionManager
+
+            projection = manager.getMediaProjection(
+                resultCode, resultData
+            )
+
+            val activeProjection = projection
+
+            if (activeProjection == null) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+
+            activeProjection.registerCallback(
+                projectionCallback, handler
+            )
+
+            startCapture()
+
+        } catch (e: Exception) {
+            stopSelf()
+        }
+
         return START_NOT_STICKY
     }
 
-    return START_NOT_STICKY
-}
+    private fun startCapture() {
+        val metrics = resources.displayMetrics
+        val width = metrics.widthPixels
+        val height = metrics.heightPixels
+        val density = metrics.densityDpi
 
-private fun startCapture() {
-    val metrics = resources.displayMetrics
-    val width = metrics.widthPixels
-    val height = metrics.heightPixels
-    val density = metrics.densityDpi
-
-    imageReader = ImageReader.newInstance(
-        width,
-        height,
-        PixelFormat.RGBA_8888,
-        2
-    )
-
-    imageReader?.setOnImageAvailableListener(
-        { reader ->
-            val image = try {
-                reader.acquireLatestImage()
-            } catch (e: Exception) {
-                null
-            }
-
-            if (image != null) {
-                try {
-                    // إطار شاشة تم التقاطه بنجاح.
-                    // سنضيف حفظ الصورة وتحليل الطاولة لاحقًا.
-                } finally {
-                    image.close()
-                }
-            }
-        },
-        handler
-    )
-
-    virtualDisplay = projection?.createVirtualDisplay(
-        "ASBilliardsScreen",
-        width,
-        height,
-        density,
-        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-        imageReader?.surface,
-        null,
-        handler
-    )
-}
-
-private fun createNotificationChannel() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "AS Billiards Screen Capture",
-            NotificationManager.IMPORTANCE_LOW
+        imageReader = ImageReader.newInstance(
+            width,
+            height,
+            PixelFormat.RGBA_8888,
+            3
         )
 
-        getSystemService(
-            NotificationManager::class.java
-        ).createNotificationChannel(channel)
+        imageReader?.setOnImageAvailableListener(
+            { reader ->
+                val image = try {
+                    reader.acquireLatestImage()
+                } catch (e: Exception) {
+                    null
+                }
+
+                if (image != null) {
+                    try {
+                        frameCount++
+
+                        val now = System.currentTimeMillis()
+
+                        if (now - lastNotificationUpdate >= 3000) {
+                            lastNotificationUpdate = now
+
+                            updateNotification(
+                                "التقاط الشاشة يعمل — الإطارات: $frameCount"
+                            )
+                        }
+                    } finally {
+                        image.close()
+                    }
+                }
+            },
+            handler
+        )
+
+        virtualDisplay = projection?.createVirtualDisplay(
+            "ASBilliardsScreen",
+            width,
+            height,
+            density,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            imageReader?.surface,
+            null,
+            handler
+        )
+
+        if (virtualDisplay == null) {
+            updateNotification("تعذر إنشاء شاشة الالتقاط")
+        } else {
+            updateNotification("تم تجهيز خدمة التقاط الشاشة")
+        }
     }
-}
 
-private fun createNotification(): Notification {
-    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("AS BILLIARDS AI")
-            .setContentText("التقاط الشاشة نشط")
-            .setSmallIcon(android.R.drawable.ic_menu_view)
-            .build()
-    } else {
-        @Suppress("DEPRECATION")
-        Notification.Builder(this)
-            .setContentTitle("AS BILLIARDS AI")
-            .setContentText("التقاط الشاشة نشط")
-            .setSmallIcon(android.R.drawable.ic_menu_view)
-            .build()
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "AS Billiards Screen Capture",
+                NotificationManager.IMPORTANCE_LOW
+            )
+
+            getSystemService(
+                NotificationManager::class.java
+            ).createNotificationChannel(channel)
+        }
     }
-}
 
-override fun onDestroy() {
-    virtualDisplay?.release()
-    virtualDisplay = null
+    private fun createNotification(message: String): Notification {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, CHANNEL_ID)
+                .setContentTitle("AS BILLIARDS AI")
+                .setContentText(message)
+                .setSmallIcon(android.R.drawable.ic_menu_view)
+                .setOnlyAlertOnce(true)
+                .build()
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+                .setContentTitle("AS BILLIARDS AI")
+                .setContentText(message)
+                .setSmallIcon(android.R.drawable.ic_menu_view)
+                .setOnlyAlertOnce(true)
+                .build()
+        }
+    }
 
-    imageReader?.close()
-    imageReader = null
+    private fun updateNotification(message: String) {
+        val manager = getSystemService(
+            Context.NOTIFICATION_SERVICE
+        ) as NotificationManager
 
-    projection?.stop()
-    projection = null
+        manager.notify(
+            NOTIFICATION_ID,
+            createNotification(message)
+        )
+    }
 
-    super.onDestroy()
-}
+    override fun onDestroy() {
+        virtualDisplay?.release()
+        virtualDisplay = null
 
-override fun onBind(intent: Intent?): IBinder? = null
+        imageReader?.setOnImageAvailableListener(null, null)
+        imageReader?.close()
+        imageReader = null
 
+        projection?.unregisterCallback(projectionCallback)
+        projection?.stop()
+        projection = null
+
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
 }
