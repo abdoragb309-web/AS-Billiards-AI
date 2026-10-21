@@ -13,66 +13,98 @@ import android.view.WindowManager
 
 class TrajectoryOverlayService : Service() {
 
-private lateinit var windowManager: WindowManager
-private var overlayView: TrajectoryOverlay? = null
+    private var windowManager: WindowManager? = null
+    private var overlayView: TrajectoryOverlay? = null
 
-override fun onCreate() {
-    super.onCreate()
+    companion object {
+        const val ACTION_SHOW =
+            "com.dezel.asbilliards.SHOW_OVERLAY"
 
-    if (!Settings.canDrawOverlays(this)) {
-        stopSelf()
-        return
+        const val ACTION_HIDE =
+            "com.dezel.asbilliards.HIDE_OVERLAY"
     }
 
-    windowManager =
-        getSystemService(WINDOW_SERVICE) as WindowManager
+    override fun onCreate() {
+        super.onCreate()
 
-    overlayView = TrajectoryOverlay(this).apply {
-        setBackgroundColor(Color.TRANSPARENT)
-        setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+        windowManager =
+            getSystemService(WINDOW_SERVICE) as WindowManager
     }
 
-    val windowType =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        } else {
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int
+    ): Int {
+
+        when (intent?.action) {
+            ACTION_HIDE -> hideOverlay()
+            ACTION_SHOW, null -> showOverlay()
         }
 
-    val params = WindowManager.LayoutParams(
-        WindowManager.LayoutParams.MATCH_PARENT,
-        WindowManager.LayoutParams.MATCH_PARENT,
-        windowType,
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-        PixelFormat.TRANSLUCENT
-    ).apply {
-        gravity = Gravity.TOP or Gravity.START
+        return START_NOT_STICKY
     }
 
-    try {
-        windowManager.addView(overlayView, params)
-    } catch (e: Exception) {
-        overlayView = null
-        stopSelf()
-    }
-}
+    private fun showOverlay() {
+        if (!Settings.canDrawOverlays(this)) {
+            stopSelf()
+            return
+        }
 
-override fun onDestroy() {
-    overlayView?.let { view ->
+        if (overlayView != null) return
+
+        val wm = windowManager ?: return
+
+        val view = TrajectoryOverlay(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+        }
+
+        val windowType =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_PHONE
+            }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            windowType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+        }
+
         try {
-            windowManager.removeView(view)
+            wm.addView(view, params)
+            overlayView = view
+        } catch (_: Exception) {
+            overlayView = null
+            stopSelf()
+        }
+    }
+
+    private fun hideOverlay() {
+        val view = overlayView ?: return
+
+        try {
+            windowManager?.removeView(view)
         } catch (_: Exception) {
         }
+
+        overlayView = null
     }
 
-    overlayView = null
-    super.onDestroy()
-}
+    override fun onDestroy() {
+        hideOverlay()
+        windowManager = null
+        super.onDestroy()
+    }
 
-override fun onBind(intent: Intent?): IBinder? = null
-
+    override fun onBind(intent: Intent?): IBinder? = null
 }
