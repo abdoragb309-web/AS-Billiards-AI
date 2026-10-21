@@ -3,9 +3,11 @@ package com.dezel.asbilliards
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.media.projection.MediaProjectionManager
-import android.os.Bundle
 import android.graphics.Color
+import android.media.projection.MediaProjectionManager
+import android.net.Uri
+import android.os.Bundle
+import android.provider.Settings
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
@@ -55,7 +57,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
         text = "تحليل الطاولة"
         setOnClickListener {
             statusText.text =
-                "التقاط الصور وتحليل الكرات لم يُفعّل بعد"
+                "اكتشاف الكرات وحساب مساراتها لم يُفعّل بعد"
         }
     }
 
@@ -66,13 +68,49 @@ override fun onCreate(savedInstanceState: Bundle?) {
         }
     }
 
+    val overlayButton = Button(this).apply {
+        text = "إظهار خطوط تجريبية فوق الشاشة"
+        setOnClickListener {
+            openTrajectoryOverlay()
+        }
+    }
+
     root.addView(title)
     root.addView(subtitle)
     root.addView(statusText, spacedParams())
     root.addView(analyzeButton, spacedParams())
     root.addView(screenButton, spacedParams())
+    root.addView(overlayButton, spacedParams())
 
     setContentView(root)
+}
+
+private fun openTrajectoryOverlay() {
+    if (!Settings.canDrawOverlays(this)) {
+        statusText.text =
+            "اسمح للتطبيق بالظهور فوق التطبيقات الأخرى"
+
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+
+        startActivity(intent)
+        return
+    }
+
+    try {
+        startService(
+            Intent(this, TrajectoryOverlayService::class.java)
+        )
+
+        statusText.text =
+            "تم طلب عرض الخطوط التجريبية فوق الشاشة"
+
+    } catch (e: Exception) {
+        statusText.text =
+            "تعذر تشغيل الخطوط: ${e.message}"
+    }
 }
 
 private fun requestScreenCapture() {
@@ -80,7 +118,8 @@ private fun requestScreenCapture() {
         Context.MEDIA_PROJECTION_SERVICE
     ) as MediaProjectionManager
 
-    statusText.text = "بانتظار موافقتك على التقاط الشاشة..."
+    statusText.text =
+        "بانتظار موافقتك على التقاط الشاشة..."
 
     startActivityForResult(
         manager.createScreenCaptureIntent(),
@@ -107,6 +146,7 @@ override fun onActivityResult(
                 ScreenCaptureService.EXTRA_RESULT_CODE,
                 resultCode
             )
+
             putExtra(
                 ScreenCaptureService.EXTRA_RESULT_DATA,
                 data
@@ -115,14 +155,18 @@ override fun onActivityResult(
 
         try {
             startForegroundService(serviceIntent)
+
             statusText.text =
                 "تم إرسال إذن الشاشة إلى الخدمة."
+
         } catch (e: Exception) {
             statusText.text =
-                "تعذر تشغيل الخدمة: ${e.message}"
+                "تعذر تشغيل خدمة الالتقاط: ${e.message}"
         }
+
     } else {
-        statusText.text = "تم إلغاء إذن التقاط الشاشة."
+        statusText.text =
+            "تم إلغاء إذن التقاط الشاشة."
     }
 }
 
