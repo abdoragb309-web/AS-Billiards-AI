@@ -55,12 +55,12 @@ override fun onCreate(savedInstanceState: Bundle?) {
         text = "تحليل الطاولة"
         setOnClickListener {
             statusText.text =
-                "تحليل الكرات والمسارات لم يُفعّل بعد"
+                "التقاط الصور وتحليل الكرات لم يُفعّل بعد"
         }
     }
 
     val screenButton = Button(this).apply {
-        text = "إعداد التقاط الشاشة"
+        text = "بدء التقاط الشاشة"
         setOnClickListener {
             requestScreenCapture()
         }
@@ -80,7 +80,7 @@ private fun requestScreenCapture() {
         Context.MEDIA_PROJECTION_SERVICE
     ) as MediaProjectionManager
 
-    statusText.text = "بانتظار إذن التقاط الشاشة..."
+    statusText.text = "بانتظار موافقتك على التقاط الشاشة..."
 
     startActivityForResult(
         manager.createScreenCaptureIntent(),
@@ -96,13 +96,33 @@ override fun onActivityResult(
 ) {
     super.onActivityResult(requestCode, resultCode, data)
 
-    if (requestCode == captureRequestCode) {
-        if (resultCode == RESULT_OK && data != null) {
-            statusText.text =
-                "تم منح الإذن. سنفعّل الالتقاط في الخطوة التالية."
-        } else {
-            statusText.text = "تم إلغاء إذن التقاط الشاشة."
+    if (requestCode != captureRequestCode) return
+
+    if (resultCode == RESULT_OK && data != null) {
+        val serviceIntent = Intent(
+            this,
+            ScreenCaptureService::class.java
+        ).apply {
+            putExtra(
+                ScreenCaptureService.EXTRA_RESULT_CODE,
+                resultCode
+            )
+            putExtra(
+                ScreenCaptureService.EXTRA_RESULT_DATA,
+                data
+            )
         }
+
+        try {
+            startForegroundService(serviceIntent)
+            statusText.text =
+                "تم إرسال إذن الشاشة إلى الخدمة."
+        } catch (e: Exception) {
+            statusText.text =
+                "تعذر تشغيل الخدمة: ${e.message}"
+        }
+    } else {
+        statusText.text = "تم إلغاء إذن التقاط الشاشة."
     }
 }
 
