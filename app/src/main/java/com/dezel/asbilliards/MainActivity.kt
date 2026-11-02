@@ -12,15 +12,19 @@ import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import org.opencv.android.OpenCVLoader
 
 class MainActivity : Activity() {
 
 private lateinit var statusText: TextView
 
 private val captureRequestCode = 2001
+private var openCvReady = false
 
 override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+
+    openCvReady = OpenCVLoader.initLocal()
 
     window.statusBarColor = Color.rgb(10, 35, 30)
     window.navigationBarColor = Color.BLACK
@@ -47,7 +51,11 @@ override fun onCreate(savedInstanceState: Bundle?) {
     }
 
     statusText = TextView(this).apply {
-        text = "حالة النظام: جاهز"
+        text = if (openCvReady) {
+            "حالة النظام: OpenCV جاهز"
+        } else {
+            "تعذر تشغيل مكتبة تحليل الصور"
+        }
         textSize = 16f
         gravity = Gravity.CENTER
         setTextColor(Color.rgb(100, 255, 160))
@@ -57,7 +65,11 @@ override fun onCreate(savedInstanceState: Bundle?) {
         text = "تحليل الطاولة"
         setOnClickListener {
             statusText.text =
-                "اكتشاف الكرات وحساب مساراتها لم يُفعّل بعد"
+                if (openCvReady) {
+                    "OpenCV جاهز — اكتشاف الكرات لم يُفعّل بعد"
+                } else {
+                    "مكتبة تحليل الصور غير جاهزة"
+                }
         }
     }
 
@@ -116,13 +128,10 @@ private fun openTrajectoryOverlay() {
         }
 
         startService(intent)
-
-        statusText.text =
-            "تم طلب عرض الخطوط التجريبية فوق الشاشة"
+        statusText.text = "تم طلب عرض الخطوط التجريبية فوق الشاشة"
 
     } catch (e: Exception) {
-        statusText.text =
-            "تعذر تشغيل الخطوط: ${e.message}"
+        statusText.text = "تعذر تشغيل الخطوط: ${e.message}"
     }
 }
 
@@ -136,12 +145,10 @@ private fun hideTrajectoryOverlay() {
         }
 
         startService(intent)
-
         statusText.text = "تم طلب إخفاء المسارات"
 
     } catch (e: Exception) {
-        statusText.text =
-            "تعذر إخفاء الخطوط: ${e.message}"
+        statusText.text = "تعذر إخفاء الخطوط: ${e.message}"
     }
 }
 
@@ -150,8 +157,7 @@ private fun requestScreenCapture() {
         Context.MEDIA_PROJECTION_SERVICE
     ) as MediaProjectionManager
 
-    statusText.text =
-        "بانتظار موافقتك على التقاط الشاشة..."
+    statusText.text = "بانتظار موافقتك على التقاط الشاشة..."
 
     startActivityForResult(
         manager.createScreenCaptureIntent(),
@@ -178,7 +184,6 @@ override fun onActivityResult(
                 ScreenCaptureService.EXTRA_RESULT_CODE,
                 resultCode
             )
-
             putExtra(
                 ScreenCaptureService.EXTRA_RESULT_DATA,
                 data
@@ -187,9 +192,7 @@ override fun onActivityResult(
 
         try {
             startForegroundService(serviceIntent)
-
-            statusText.text =
-                "تم إرسال إذن الشاشة إلى الخدمة."
+            statusText.text = "تم إرسال إذن الشاشة إلى الخدمة."
 
         } catch (e: Exception) {
             statusText.text =
@@ -197,8 +200,7 @@ override fun onActivityResult(
         }
 
     } else {
-        statusText.text =
-            "تم إلغاء إذن التقاط الشاشة."
+        statusText.text = "تم إلغاء إذن التقاط الشاشة."
     }
 }
 
