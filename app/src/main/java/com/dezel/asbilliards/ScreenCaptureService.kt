@@ -147,6 +147,7 @@ class ScreenCaptureService : Service() {
 
         imageReader?.setOnImageAvailableListener(
             { reader ->
+
                 val image = try {
                     reader.acquireLatestImage()
                 } catch (e: Exception) {
@@ -159,23 +160,23 @@ class ScreenCaptureService : Service() {
 
                         val now = System.currentTimeMillis()
 
-                        // تحليل إطار واحد كل نصف ثانية
-                        if (openCvReady &&
+                        if (
+                            openCvReady &&
                             now - lastAnalysisTime >= 500
                         ) {
                             lastAnalysisTime = now
+
                             detectedCircles = analyzeImage(image)
+
+                            // إرسال نتيجة التحليل إلى التطبيق
+                            sendAnalysisResult(detectedCircles)
                         }
 
                         if (now - lastNotificationUpdate >= 3000) {
                             lastNotificationUpdate = now
 
                             updateNotification(
-                                if (openCvReady) {
-                                    "الالتقاط يعمل — أجسام دائرية مبدئياً: $detectedCircles"
-                                } else {
-                                    "OpenCV غير جاهز — الإطارات: $frameCount"
-                                }
+                                "الالتقاط يعمل — الدوائر المكتشفة: $detectedCircles"
                             )
                         }
 
@@ -205,6 +206,22 @@ class ScreenCaptureService : Service() {
         } else {
             updateNotification("تم تجهيز الالتقاط وربط OpenCV")
         }
+    }
+
+    private fun sendAnalysisResult(count: Int) {
+
+        val resultIntent = Intent(
+            AnalysisReceiver.ACTION_ANALYSIS_RESULT
+        ).apply {
+            setPackage(packageName)
+
+            putExtra(
+                AnalysisReceiver.EXTRA_DETECTED_COUNT,
+                count
+            )
+        }
+
+        sendBroadcast(resultIntent)
     }
 
     private fun analyzeImage(image: Image): Int {
@@ -260,7 +277,6 @@ class ScreenCaptureService : Service() {
                 Imgproc.COLOR_RGBA2GRAY
             )
 
-            // تصغير الصورة لتخفيف الحمل
             Imgproc.resize(
                 gray,
                 small,
@@ -274,91 +290,7 @@ class ScreenCaptureService : Service() {
                 1.5
             )
 
-            // رصد الدوائر مبدئياً
             Imgproc.HoughCircles(
                 small,
                 circles,
-                Imgproc.HOUGH_GRADIENT,
-                1.0,
-                12.0,
-                100.0,
-                18.0,
-                4,
-                18
-            )
-
-            return circles.cols()
-
-        } finally {
-            rgba.release()
-            gray.release()
-            small.release()
-            circles.release()
-            bitmap.recycle()
-        }
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "AS BILLIARDS Screen Capture",
-                NotificationManager.IMPORTANCE_LOW
-            )
-
-            getSystemService(
-                NotificationManager::class.java
-            ).createNotificationChannel(channel)
-        }
-    }
-
-    private fun createNotification(
-        message: String
-    ): Notification {
-
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("AS BILLIARDS AI")
-                .setContentText(message)
-                .setSmallIcon(android.R.drawable.ic_menu_view)
-                .setOnlyAlertOnce(true)
-                .build()
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-                .setContentTitle("AS BILLIARDS AI")
-                .setContentText(message)
-                .setSmallIcon(android.R.drawable.ic_menu_view)
-                .setOnlyAlertOnce(true)
-                .build()
-        }
-    }
-
-    private fun updateNotification(message: String) {
-        val manager = getSystemService(
-            Context.NOTIFICATION_SERVICE
-        ) as NotificationManager
-
-        manager.notify(
-            NOTIFICATION_ID,
-            createNotification(message)
-        )
-    }
-
-    override fun onDestroy() {
-        virtualDisplay?.release()
-        virtualDisplay = null
-
-        imageReader?.setOnImageAvailableListener(null, null)
-        imageReader?.close()
-        imageReader = null
-
-        projection?.unregisterCallback(projectionCallback)
-        projection?.stop()
-        projection = null
-
-        super.onDestroy()
-    }
-
-    override fun onBind(intent: Intent?): IBinder? = null
-}
+                Imgproc.HOUGH
