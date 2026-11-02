@@ -20,7 +20,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.view.WindowManager
 
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
@@ -30,186 +29,337 @@ import org.opencv.imgproc.Imgproc
 
 class ScreenCaptureService : Service() {
 
-    private var mediaProjection: MediaProjection? = null
-    private var virtualDisplay: VirtualDisplay? = null
-    private var imageReader: ImageReader? = null
+companion object {  
+    const val EXTRA_RESULT_CODE = "result_code"  
+    const val EXTRA_RESULT_DATA = "result_data"  
 
-    private val handler = Handler(Looper.getMainLooper())
+    private const val CHANNEL_ID = "as_billiards_capture"  
+    private const val NOTIFICATION_ID = 1001  
+}  
 
-    private var lastAnalysisTime = 0L
+private var projection: MediaProjection? = null  
+private var virtualDisplay: VirtualDisplay? = null  
+private var imageReader: ImageReader? = null  
 
-    companion object {
-        const val EXTRA_RESULT_CODE = "result_code"
-        const val EXTRA_RESULT_DATA = "result_data"
+private val handler = Handler(Looper.getMainLooper())  
 
-        private const val CHANNEL_ID = "as_billiards_capture"
-        private const val NOTIFICATION_ID = 1001
-    }
+private var frameCount = 0  
+private var lastNotificationUpdate = 0L  
+private var lastAnalysisTime = 0L  
+private var detectedCircles = 0  
 
-    override fun onCreate() {
-        super.onCreate()
+private var openCvReady = false  
 
-        createNotificationChannel()
+private val projectionCallback =  
+    object : MediaProjection.Callback() {  
+        override fun onStop() {  
+            stopSelf()  
+        }  
+    }  
 
-        if (!OpenCVLoader.initDebug()) {
-            stopSelf()
-        }
-    }
+override fun onCreate() {  
+    super.onCreate()  
+    createNotificationChannel()  
+    openCvReady = OpenCVLoader.initLocal()  
+}  
 
-    override fun onStartCommand(
-        intent: Intent?,
-        flags: Int,
-        startId: Int
-    ): Int {
+override fun onStartCommand(  
+    intent: Intent?,  
+    flags: Int,  
+    startId: Int  
+): Int {  
 
-        if (intent == null) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
+    val resultCode = intent?.getIntExtra(  
+        EXTRA_RESULT_CODE, 0  
+    ) ?: 0  
 
-        val notification = createNotification("جاري تشغيل تحليل الشاشة")
+    val resultData: Intent? =  
+        if (Build.VERSION.SDK_INT >= 33) {  
+            intent?.getParcelableExtra(  
+                EXTRA_RESULT_DATA,  
+                Intent::class.java  
+            )  
+        } else {  
+            @Suppress("DEPRECATION")  
+            intent?.getParcelableExtra(EXTRA_RESULT_DATA)  
+        }  
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
-        } else {
-            startForeground(
-                NOTIFICATION_ID,
-                notification
-            )
-        }
+    if (resultData == null) {  
+        stopSelf()  
+        return START_NOT_STICKY  
+    }  
 
-        val resultCode = intent.getIntExtra(
-            EXTRA_RESULT_CODE,
-            -1
-        )
+    try {  
+        if (Build.VERSION.SDK_INT >= 29) {  
+            startForeground(  
+                NOTIFICATION_ID,  
+                createNotification("جاري تجهيز الالتقاط"),  
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION  
+            )  
+        } else {  
+            startForeground(  
+                NOTIFICATION_ID,  
+                createNotification("جاري تجهيز الالتقاط")  
+            )  
+        }  
 
-        val resultData: Intent? =
-            if (Build.VERSION.SDK_INT >= 33) {
-                intent.getParcelableExtra(
-                    EXTRA_RESULT_DATA,
-                    Intent::class.java
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(EXTRA_RESULT_DATA)
-            }
+        val manager = getSystemService(  
+            Context.MEDIA_PROJECTION_SERVICE  
+        ) as MediaProjectionManager  
 
-        if (resultCode == -1 || resultData == null) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
+        projection = manager.getMediaProjection(  
+            resultCode, resultData  
+        )  
 
-        try {
-            val manager = getSystemService(
-                Context.MEDIA_PROJECTION_SERVICE
-            ) as MediaProjectionManager
+        val activeProjection = projection  
 
-            mediaProjection = manager.getMediaProjection(
-                resultCode,
-                resultData
-            )
+        if (activeProjection == null) {  
+            stopSelf()  
+            return START_NOT_STICKY  
+        }  
 
-            mediaProjection?.registerCallback(
-                object : MediaProjection.Callback() {
-                    override fun onStop() {
-                        stopSelf()
-                    }
-                },
-                handler
-            )
+        activeProjection.registerCallback(  
+            projectionCallback, handler  
+        )  
 
-            startCapture()
+        startCapture()  
 
-        } catch (e: Exception) {
-            e.printStackTrace()
-            stopSelf()
-        }
+    } catch (e: Exception) {  
+        updateNotification("حدث خطأ أثناء بدء الالتقاط")  
+        stopSelf()  
+    }  
 
-        return START_NOT_STICKY
-    }
+    return START_NOT_STICKY  
+}  
 
-    private fun startCapture() {
+private fun startCapture() {  
+    val metrics = resources.displayMetrics  
+    val width = metrics.widthPixels  
+    val height = metrics.heightPixels  
+    val density = metrics.densityDpi  
 
-        val metrics = resources.displayMetrics
+    imageReader = ImageReader.newInstance(  
+        width,  
+        height,  
+        PixelFormat.RGBA_8888,  
+        3  
+    )  
 
-        val width = metrics.widthPixels
-        val height = metrics.heightPixels
-        val density = metrics.densityDpi
+    imageReader?.setOnImageAvailableListener(  
+        { reader ->  
+            val image = try {  
+                reader.acquireLatestImage()  
+            } catch (e: Exception) {  
+                null  
+            }  
 
-        imageReader = ImageReader.newInstance(
-            width,
-            height,
-            PixelFormat.RGBA_8888,
-            2
-        )
+            if (image != null) {  
+                try {  
+                    frameCount++  
 
-        imageReader?.setOnImageAvailableListener(
-            { reader ->
+                    val now = System.currentTimeMillis()  
 
-                val image = reader.acquireLatestImage()
+                    // تحليل إطار واحد كل نصف ثانية  
+                    if (openCvReady &&  
+                        now - lastAnalysisTime >= 500  
+                    ) {  
+                        lastAnalysisTime = now  
+                        detectedCircles = analyzeImage(image)  
+                    }  
 
-                if (image != null) {
+                    if (now - lastNotificationUpdate >= 3000) {  
+                        lastNotificationUpdate = now  
 
-                    try {
-                        val now = System.currentTimeMillis()
+                        updateNotification(  
+                            if (openCvReady) {  
+                                "الالتقاط يعمل — أجسام دائرية مبدئياً: $detectedCircles"  
+                            } else {  
+                                "OpenCV غير جاهز — الإطارات: $frameCount"  
+                            }  
+                        )  
+                    }  
 
-                        if (now - lastAnalysisTime >= 500) {
+                } catch (e: Exception) {  
+                    updateNotification("تعذر تحليل إطار الشاشة")  
+                } finally {  
+                    image.close()  
+                }  
+            }  
+        },  
+        handler  
+    )  
 
-                            lastAnalysisTime = now
+    virtualDisplay = projection?.createVirtualDisplay(  
+        "ASBilliardsScreen",  
+        width,  
+        height,  
+        density,  
+        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,  
+        imageReader?.surface,  
+        null,  
+        handler  
+    )  
 
-                            val count = analyzeImage(image)
+    if (virtualDisplay == null) {  
+        updateNotification("تعذر إنشاء شاشة الالتقاط")  
+    } else {  
+        updateNotification("تم تجهيز الالتقاط وربط OpenCV")  
+    }  
+}  
 
-                            sendAnalysisResult(count)
-                        }
+private fun analyzeImage(image: Image): Int {  
 
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    } finally {
-                        image.close()
-                    }
-                }
+    val plane = image.planes[0]  
+    val buffer = plane.buffer  
 
-            },
-            handler
-        )
+    val width = image.width  
+    val height = image.height  
 
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "AS_BILLIARDS_CAPTURE",
-            width,
-            height,
-            density,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
-            null,
-            handler
-        )
-    }
+    val rowStride = plane.rowStride  
+    val pixelStride = plane.pixelStride  
 
-    private fun analyzeImage(image: Image): Int {
+    val pixels = IntArray(width * height)  
 
-        val plane = image.planes[0]
-        val buffer = plane.buffer.duplicate()
+    for (y in 0 until height) {  
+        for (x in 0 until width) {  
 
-        val width = image.width
-        val height = image.height
+            val index =  
+                y * rowStride + x * pixelStride  
 
-        val rowStride = plane.rowStride
-        val pixelStride = plane.pixelStride
-        val bufferLimit = buffer.limit()
+            val r = buffer.get(index).toInt() and 0xFF  
+            val g = buffer.get(index + 1).toInt() and 0xFF  
+            val b = buffer.get(index + 2).toInt() and 0xFF  
+            val a = buffer.get(index + 3).toInt() and 0xFF  
 
-        val pixels = IntArray(width * height)
+            pixels[y * width + x] =  
+                Color.argb(a, r, g, b)  
+        }  
+    }  
 
-        for (y in 0 until height) {
-            for (x in 0 until width) {
+    val bitmap = Bitmap.createBitmap(  
+        width,  
+        height,  
+        Bitmap.Config.ARGB_8888  
+    )  
 
-                val index =
-                    y * rowStride + x * pixelStride
+    bitmap.setPixels(  
+        pixels, 0, width, 0, 0, width, height  
+    )  
 
-                if (index + 3 >= bufferLimit) continue
+    val rgba = Mat()  
+    val gray = Mat()  
+    val small = Mat()  
+    val circles = Mat()  
 
-                val r = buffer.get(index).toInt() and 0xFF
-                val g = buffer.get(index + 1).toInt() and 0
+    try {  
+        Utils.bitmapToMat(bitmap, rgba)  
+
+        Imgproc.cvtColor(  
+            rgba,  
+            gray,  
+            Imgproc.COLOR_RGBA2GRAY  
+        )  
+
+        // تصغير الصورة لتخفيف الحمل  
+        Imgproc.resize(  
+            gray,  
+            small,  
+            Size(width / 2.0, height / 2.0)  
+        )  
+
+        Imgproc.GaussianBlur(  
+            small,  
+            small,  
+            Size(5.0, 5.0),  
+            1.5  
+        )  
+
+        // رصد الدوائر مبدئياً  
+        Imgproc.HoughCircles(  
+            small,  
+            circles,  
+            Imgproc.HOUGH_GRADIENT,  
+            1.0,  
+            12.0,  
+            100.0,  
+            18.0,  
+            4,  
+            18  
+        )  
+
+        return circles.cols()  
+
+    } finally {  
+        rgba.release()  
+        gray.release()  
+        small.release()  
+        circles.release()  
+        bitmap.recycle()  
+    }  
+}  
+
+private fun createNotificationChannel() {  
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {  
+        val channel = NotificationChannel(  
+            CHANNEL_ID,  
+            "AS BILLIARDS Screen Capture",  
+            NotificationManager.IMPORTANCE_LOW  
+        )  
+
+        getSystemService(  
+            NotificationManager::class.java  
+        ).createNotificationChannel(channel)  
+    }  
+}  
+
+private fun createNotification(  
+    message: String  
+): Notification {  
+
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {  
+        Notification.Builder(this, CHANNEL_ID)  
+            .setContentTitle("AS BILLIARDS AI")  
+            .setContentText(message)  
+            .setSmallIcon(android.R.drawable.ic_menu_view)  
+            .setOnlyAlertOnce(true)  
+            .build()  
+    } else {  
+        @Suppress("DEPRECATION")  
+        Notification.Builder(this)  
+            .setContentTitle("AS BILLIARDS AI")  
+            .setContentText(message)  
+            .setSmallIcon(android.R.drawable.ic_menu_view)  
+            .setOnlyAlertOnce(true)  
+            .build()  
+    }  
+}  
+
+private fun updateNotification(message: String) {  
+    val manager = getSystemService(  
+        Context.NOTIFICATION_SERVICE  
+    ) as NotificationManager  
+
+    manager.notify(  
+        NOTIFICATION_ID,  
+        createNotification(message)  
+    )  
+}  
+
+override fun onDestroy() {  
+    virtualDisplay?.release()  
+    virtualDisplay = null  
+
+    imageReader?.setOnImageAvailableListener(null, null)  
+    imageReader?.close()  
+    imageReader = null  
+
+    projection?.unregisterCallback(projectionCallback)  
+    projection?.stop()  
+    projection = null  
+
+    super.onDestroy()  
+}  
+
+override fun onBind(intent: Intent?): IBinder? = null
+
+}
