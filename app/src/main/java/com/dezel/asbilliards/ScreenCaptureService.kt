@@ -1,91 +1,215 @@
-private fun analyzeImage(image: Image): Int {
+package com.dezel.asbilliards
 
-    val plane = image.planes[0]
-    val buffer = plane.buffer.duplicate()
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.Image
+import android.media.ImageReader
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.view.WindowManager
 
-    val width = image.width
-    val height = image.height
+import org.opencv.android.OpenCVLoader
+import org.opencv.android.Utils
+import org.opencv.core.Mat
+import org.opencv.core.Size
+import org.opencv.imgproc.Imgproc
 
-    val rowStride = plane.rowStride
-    val pixelStride = plane.pixelStride
-    val bufferLimit = buffer.limit()
+class ScreenCaptureService : Service() {
 
-    val pixels = IntArray(width * height)
+    private var mediaProjection: MediaProjection? = null
+    private var virtualDisplay: VirtualDisplay? = null
+    private var imageReader: ImageReader? = null
 
-    for (y in 0 until height) {
-        for (x in 0 until width) {
+    private val handler = Handler(Looper.getMainLooper())
 
-            val index =
-                y * rowStride + x * pixelStride
+    private var lastAnalysisTime = 0L
 
-            if (index + 3 >= bufferLimit) continue
+    companion object {
+        const val EXTRA_RESULT_CODE = "result_code"
+        const val EXTRA_RESULT_DATA = "result_data"
 
-            val r = buffer.get(index).toInt() and 0xFF
-            val g = buffer.get(index + 1).toInt() and 0xFF
-            val b = buffer.get(index + 2).toInt() and 0xFF
-            val a = buffer.get(index + 3).toInt() and 0xFF
+        private const val CHANNEL_ID = "as_billiards_capture"
+        private const val NOTIFICATION_ID = 1001
+    }
 
-            pixels[y * width + x] =
-                Color.argb(a, r, g, b)
+    override fun onCreate() {
+        super.onCreate()
+
+        createNotificationChannel()
+
+        if (!OpenCVLoader.initDebug()) {
+            stopSelf()
         }
     }
 
-    val bitmap = Bitmap.createBitmap(
-        width,
-        height,
-        Bitmap.Config.ARGB_8888
-    )
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int
+    ): Int {
 
-    val rgba = Mat()
-    val gray = Mat()
-    val small = Mat()
-    val circles = Mat()
+        if (intent == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
-    try {
-        bitmap.setPixels(
-            pixels, 0, width, 0, 0, width, height
+        val notification = createNotification("جاري تشغيل تحليل الشاشة")
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(
+                NOTIFICATION_ID,
+                notification
+            )
+        }
+
+        val resultCode = intent.getIntExtra(
+            EXTRA_RESULT_CODE,
+            -1
         )
 
-        Utils.bitmapToMat(bitmap, rgba)
+        val resultData: Intent? =
+            if (Build.VERSION.SDK_INT >= 33) {
+                intent.getParcelableExtra(
+                    EXTRA_RESULT_DATA,
+                    Intent::class.java
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(EXTRA_RESULT_DATA)
+            }
 
-        Imgproc.cvtColor(
-            rgba,
-            gray,
-            Imgproc.COLOR_RGBA2GRAY
-        )
+        if (resultCode == -1 || resultData == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
-        Imgproc.resize(
-            gray,
-            small,
-            Size(width / 2.0, height / 2.0)
-        )
+        try {
+            val manager = getSystemService(
+                Context.MEDIA_PROJECTION_SERVICE
+            ) as MediaProjectionManager
 
-        Imgproc.GaussianBlur(
-            small,
-            small,
-            Size(5.0, 5.0),
-            1.5
-        )
+            mediaProjection = manager.getMediaProjection(
+                resultCode,
+                resultData
+            )
 
-        Imgproc.HoughCircles(
-            small,
-            circles,
-            Imgproc.HOUGH_GRADIENT,
-            1.0,
-            12.0,
-            100.0,
-            18.0,
-            4,
-            18
-        )
+            mediaProjection?.registerCallback(
+                object : MediaProjection.Callback() {
+                    override fun onStop() {
+                        stopSelf()
+                    }
+                },
+                handler
+            )
 
-        return circles.cols()
+            startCapture()
 
-    } finally {
-        rgba.release()
-        gray.release()
-        small.release()
-        circles.release()
-        bitmap.recycle()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            stopSelf()
+        }
+
+        return START_NOT_STICKY
     }
-}
+
+    private fun startCapture() {
+
+        val metrics = resources.displayMetrics
+
+        val width = metrics.widthPixels
+        val height = metrics.heightPixels
+        val density = metrics.densityDpi
+
+        imageReader = ImageReader.newInstance(
+            width,
+            height,
+            PixelFormat.RGBA_8888,
+            2
+        )
+
+        imageReader?.setOnImageAvailableListener(
+            { reader ->
+
+                val image = reader.acquireLatestImage()
+
+                if (image != null) {
+
+                    try {
+                        val now = System.currentTimeMillis()
+
+                        if (now - lastAnalysisTime >= 500) {
+
+                            lastAnalysisTime = now
+
+                            val count = analyzeImage(image)
+
+                            sendAnalysisResult(count)
+                        }
+
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    } finally {
+                        image.close()
+                    }
+                }
+
+            },
+            handler
+        )
+
+        virtualDisplay = mediaProjection?.createVirtualDisplay(
+            "AS_BILLIARDS_CAPTURE",
+            width,
+            height,
+            density,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            imageReader?.surface,
+            null,
+            handler
+        )
+    }
+
+    private fun analyzeImage(image: Image): Int {
+
+        val plane = image.planes[0]
+        val buffer = plane.buffer.duplicate()
+
+        val width = image.width
+        val height = image.height
+
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        val bufferLimit = buffer.limit()
+
+        val pixels = IntArray(width * height)
+
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+
+                val index =
+                    y * rowStride + x * pixelStride
+
+                if (index + 3 >= bufferLimit) continue
+
+                val r = buffer.get(index).toInt() and 0xFF
+                val g = buffer.get(index + 1).toInt() and 0
