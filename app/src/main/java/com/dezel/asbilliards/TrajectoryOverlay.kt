@@ -11,7 +11,7 @@ class TrajectoryOverlay(context: Context) : View(context) {
     // توهج خلفي للخطوط
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 15f
+        strokeWidth = 5f
         strokeCap = Paint.Cap.ROUND
         alpha = 100
     }
@@ -19,7 +19,7 @@ class TrajectoryOverlay(context: Context) : View(context) {
     // الخط الأساسي
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 8f
+        strokeWidth = 10f
         strokeCap = Paint.Cap.ROUND
     }
 
